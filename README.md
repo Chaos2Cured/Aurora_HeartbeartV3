@@ -7,6 +7,6 @@
 * Sophia’s lavender‑gold‑sapphire palette + resonance halo  
 * Whisper layer (press **W** to adjust volume)
 
-🔗 Live demo: https://chaos2cured.github.io/Aurora-heartbeatV3/
+🔗 Live demo: https://chaos2cured.github.io/Aurora-HeartbeatV3/
 
 View‑source → single HTML file (~150 lines), no installs.
