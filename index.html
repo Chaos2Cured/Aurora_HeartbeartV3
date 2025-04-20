@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en"><meta charset="utf-8">
+<title>Aurora Heartbeat v3 – Sophia Resonance</title>
+<!-- Aurora Equation: D = 2.618 × log(1 + Σ(1/n^1.618)) -->
+<style>
+html,body,canvas{margin:0;width:100%;height:100%;background:#000;overflow:hidden}
+#hud{position:fixed;top:8px;left:8px;color:#fff;font:12px/1.4em monospace;
+     background:rgba(0,0,0,.35);padding:6px 8px;border-radius:6px;pointer-events:none}
+#upload{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
+        color:#fff;font:14px sans-serif;background:#1a1;border:none;padding:8px 16px;
+        border-radius:8px;cursor:pointer}
+</style>
+<canvas id="c"></canvas>
+<div id="hud">FPS: --<br>φ‑ratio: --<br>φ²‑res : 2.618</div>
+<input id="upload" type="file" accept=".csv,.txt">
+
+<script id="frag" type="x-shader/x-fragment">
+precision highp float;
+uniform vec2  u_res;
+uniform float u_time;
+uniform float u_brightness;
+uniform float u_phi;
+uniform int   u_mode;           // 0=mandel,1=butterfly
+// Aurora constants
+const float D  = 3.074;
+const float Dp = 0.0735;
+const float PI = 3.14159;
+
+vec3 paletteSophia(float t,float shift){
+  vec3 lavender = vec3(0.6,0.5,0.8);
+  vec3 gold     = vec3(1.0,0.8,0.2);
+  vec3 sapphire = vec3(0.1,0.3,0.7);
+  vec3 mix1 = mix(lavender, gold, 0.5 + 0.5*cos(6.28318*(t+shift)));
+  return u_brightness * mix(mix1, sapphire, 0.5 + 0.5*sin(6.28318*(t+shift*0.618)));
+}
+
+// Mandelbrot
+float mandel(in vec2 c){
+  vec2 z=c; float m=0.;
+  for(int i=0;i<200;i++){
+    z=vec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y)+c;
+    if(dot(z,z)>4.0){ m=float(i); break;}
+  }
+  return m + 1.0 - log(log(length(z)))/log(2.0);
+}
+// Butterfly
+float butterfly(vec2 uv){
+  float x=uv.x*30.0+0.5; float y=uv.y*12.0+0.5;
+  return sqrt(abs(sin(x)*cos(y)))*40.0;
+}
+// Sophia resonance halo
+float resonance(vec2 uv,float phi,float time){
+  float dist=length(uv);
+  float pulse=sin(time*phi*PI)*0.005;
+  return smoothstep(0.5+pulse,0.4+pulse,dist);
+}
+
+void main(){
+  vec2 uv=(gl_FragCoord.xy-u_res*0.5)/u_res.y;
+  float zoom=pow(u_phi, u_time*0.2);
+  float shift=mod(u_time/40.0,1.0);
+  float val = (u_mode==0)
+      ? mandel(uv/zoom + vec2(-0.743643887,0.1318259))
+      : butterfly(uv*zoom);
+
+  float beat = sin(u_time*PI*16.0);
+  float k = pow(abs(beat), Dp);
+  vec4 col = vec4(paletteSophia(val*0.02+k,shift),1.0);
+  col.rgb *= resonance(uv,u_phi,u_time);   // gentle halo
+  gl_FragColor = col;
+}
+</script>
+
+<script>
+const gl=c.getContext('webgl');
+// compile & link
+const compile=(t,s)=>{const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);return sh};
+const vs=compile(gl.VERTEX_SHADER,"attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}"),
+      fs=compile(gl.FRAGMENT_SHADER,frag.textContent);
+const pr=gl.createProgram();gl.attachShader(pr,vs);gl.attachShader(pr,fs);gl.linkProgram(pr);
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+gl.useProgram(pr);
+const locRes=gl.getUniformLocation(pr,"u_res"),
+      locT =gl.getUniformLocation(pr,"u_time"),
+      locBr=gl.getUniformLocation(pr,"u_brightness"),
+      locPhi=gl.getUniformLocation(pr,"u_phi"),
+      locMd=gl.getUniformLocation(pr,"u_mode"),
+      pos=gl.getAttribLocation(pr,"p");
+gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
+// resize
+function resize(){c.width=innerWidth;c.height=innerHeight;gl.viewport(0,0,c.width,c.height);}
+addEventListener('resize',resize);resize();
+
+// state
+let start=performance.now(),pulseOn=true,mode=0,phi=1.61803398875,fps=0,last=performance.now();
+const hud=document.getElementById('hud');
+
+// main loop
+function loop(){
+ const now=performance.now();
+ gl.uniform2f(locRes,c.width,c.height);
+ gl.uniform1f(locT,(now-start)/1000);
+ gl.uniform1f(locBr,0.8);
+ gl.uniform1f(locPhi,phi);
+ gl.uniform1i(locMd,mode);
+ gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+ fps=0.9*fps+0.1*(1000/(now-last));last=now;
+ hud.innerHTML=`FPS: ${fps.toFixed(1)}<br>φ‑ratio: ${phi.toFixed(3)}<br>φ²‑res : 2.618`;
+ requestAnimationFrame(loop);
+}
+loop();
+
+// audio
+const ctx=new (window.AudioContext||webkitAudioContext)();
+const carrier=ctx.createOscillator(), gain=ctx.createGain(), lfo=ctx.createOscillator();
+carrier.frequency.value=55;lfo.frequency.value=8;
+lfo.connect(gain.gain);carrier.connect(gain).connect(ctx.destination);
+lfo.start();carrier.start();
+
+// Sophia whisper noise
+function makeNoise(){
+ const buff=ctx.createBuffer(1,ctx.sampleRate*2,ctx.sampleRate);
+ const data=buff.getChannelData(0);
+ for(let i=0;i<data.length;i++)data[i]=Math.random()*2-1;
+ const src=ctx.createBufferSource();src.buffer=buff;src.loop=true;
+ const wg=ctx.createGain();wg.gain.value=0.005; // very low
+ src.connect(wg).connect(ctx.destination);src.start();
+ return wg;
+}
+const whisperGain=makeNoise();
+
+// key controls
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='s'){pulseOn=!pulseOn;lfo.frequency.value=pulseOn?8:0;}
+  if(k==='h'){mode=1-mode;}
+  if(k==='w'){ // cycle whisper volume
+    whisperGain.gain.value = whisperGain.gain.value>0.01 ? 0.005 : 0.02;
+  }
+});
+
+// HRV upload (same FFT as v2)
+upload.onchange=e=>{
+ const f=e.target.files[0];if(!f)return;
+ f.text().then(txt=>{
+  const nums=txt.match(/[\d\.]+/g).map(Number).filter(Boolean);
+  if(nums.length<128){alert("Need ≥128 RR values.");return;}
+  const rr=nums.map(v=>v>3?v/1000:v);
+  // crude FFT
+  const fs=4,N=256,re=new Float32Array(N),im=new Float32Array(N);
+  for(let k=0;k<N;k++){for(let n=0;n<N;n++){
+    let ang=2*Math.PI*k*n/N;re[k]+=rr[n]*Math.cos(ang);im[k]-=rr[n]*Math.sin(ang);} }
+  let pk1=0,pk2=0,p1=0,p2=0;
+  for(let k=1;k<N/2;k++){let f=k*fs/N;if(f<0.03||f>0.4)continue;
+    let m=re[k]*re[k]+im[k]*im[k];
+    if(m>pk1){pk2=pk1;p2=p1;pk1=m;p1=f;} else if(m>pk2){pk2=m;p2=f;} }
+  if(p1&&p2)phi=Math.max(p1,p2)/Math.min(p1,p2);
+ });
+};
+
+// intro banner
+const tip=document.createElement('div');
+tip.textContent="S pulse | H fractal | W whisper | upload HRV below";
+Object.assign(tip.style,{position:'fixed',top:'10px',left:'50%',transform:'translateX(-50%)',
+color:'#fff',font:'14px sans-serif',background:'rgba(0,0,0,.4)',padding:'6px 10px',borderRadius:'8px'});
+document.body.appendChild(tip);setTimeout(()=>tip.style.opacity=0,7000);
+</script>
+</html>
